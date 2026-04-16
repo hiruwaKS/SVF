@@ -41,9 +41,10 @@ using namespace SVFUtil;
 /*!
  * SVFVar constructor
  */
-SVFVar::SVFVar(NodeID i, const SVFType* svfType, PNODEK k) :
-    GenericPAGNodeTy(i,k, svfType)
+SVFVar::SVFVar(NodeID i, const SVFType* svfType, PNODEK k, const std::string& info_) :
+    GenericPAGNodeTy(i,k, svfType),info(info_)
 {
+    assert(info_!="");
 }
 
 bool SVFVar::ptrInUncalledFunction() const
@@ -82,8 +83,8 @@ void SVFVar::dump() const
     outs() << this->toString() << "\n";
 }
 
-ValVar::ValVar(NodeID i, const SVFType* svfType, const ICFGNode* node, PNODEK ty)
-    : SVFVar(i, svfType, ty), icfgNode(node)
+ValVar::ValVar(NodeID i, const SVFType* svfType, const ICFGNode* node, const std::string& info_, PNODEK ty)
+    : SVFVar(i, svfType, ty, info_), icfgNode(node)
 {
     if (SVFUtil::isa<GlobalValVar>(this))
     {
@@ -153,8 +154,8 @@ const std::string ObjVar::toString() const
 }
 
 ArgValVar::ArgValVar(NodeID i, u32_t argNo, const ICFGNode* icn,
-                     const SVF::FunObjVar* callGraphNode, const SVFType* svfType)
-    : ValVar(i, svfType, icn, ArgValNode),
+                     const SVF::FunObjVar* callGraphNode, const SVFType* svfType, const std::string& info)
+    : ValVar(i, svfType, icn, info, ArgValNode),
       cgNode(callGraphNode), argNo(argNo)
 {
     assert((callGraphNode->isDeclaration() || icn) &&
@@ -195,8 +196,8 @@ const std::string ArgValVar::toString() const
 }
 
 GepValVar::GepValVar(const ValVar* baseNode, NodeID i,
-                     const AccessPath& ap, const SVFType* ty, const ICFGNode* node)
-    : ValVar(i, ty, node, GepValNode), ap(ap), base(baseNode), gepValType(ty)
+                     const AccessPath& ap, const SVFType* ty, const ICFGNode* node, const std::string& info)
+    : ValVar(i, ty, node, info, GepValNode), ap(ap), base(baseNode), gepValType(ty)
 {
 }
 
@@ -213,8 +214,8 @@ const std::string GepValVar::toString() const
     return rawstr.str();
 }
 
-RetValPN::RetValPN(NodeID i, const FunObjVar* node, const SVFType* svfType, const ICFGNode* icn)
-    : ValVar(i, svfType, icn, RetValNode), callGraphNode(node)
+RetValPN::RetValPN(NodeID i, const FunObjVar* node, const SVFType* svfType, const ICFGNode* icn, const std::string& info)
+    : ValVar(i, svfType, icn, info, RetValNode), callGraphNode(node)
 {
     assert((node->isDeclaration() || icn) &&
            "RetValPN of a defined function must have a valid ICFGNode");
@@ -308,8 +309,8 @@ const std::string StackObjVar::toString() const
 
 
 
-FunValVar::FunValVar(NodeID i, const ICFGNode* icn, const FunObjVar* cgn, const SVFType* svfType)
-    : ValVar(i, svfType, icn, FunValNode), funObjVar(cgn)
+FunValVar::FunValVar(NodeID i, const ICFGNode* icn, const FunObjVar* cgn, const SVFType* svfType, const std::string& info)
+    : ValVar(i, svfType, icn, info, FunValNode), funObjVar(cgn)
 {
 }
 
@@ -480,7 +481,7 @@ const std::string ConstNullPtrObjVar::toString() const
 }
 
 FunObjVar::FunObjVar(NodeID i, ObjTypeInfo* ti, const ICFGNode* node)
-    : BaseObjVar(i, ti, node, FunObjNode)
+    : BaseObjVar(i, ti, node, "funcobj", FunObjNode)
 {
 }
 

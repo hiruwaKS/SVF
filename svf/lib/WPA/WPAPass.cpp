@@ -131,6 +131,8 @@ void WPAPass::runPointerAnalysis(SVFIR* pag, u32_t kind)
 
 void WPAPass::PrintAliasPairs(PointerAnalysis* pta)
 {
+    SVFUtil::outs() << "PrintAliasPairs\n";
+    SVFUtil::outs().flush();
     SVFIR* pag = pta->getPAG();
     for (SVFIR::iterator lit = pag->begin(), elit = pag->end(); lit != elit; ++lit)
     {
@@ -144,11 +146,26 @@ void WPAPass::PrintAliasPairs(PointerAnalysis* pta)
             const FunObjVar* fun1 = node1->getFunction();
             const FunObjVar* fun2 = node2->getFunction();
             AliasResult result = pta->alias(node1->getId(), node2->getId());
-            SVFUtil::outs()	<< (result == AliasResult::NoAlias ? "NoAlias" : "MayAlias")
-                            << " var" << node1->getId() << "[" << node1->getName()
-                            << "@" << (fun1==nullptr?"":fun1->getName()) << "] --"
-                            << " var" << node2->getId() << "[" << node2->getName()
-                            << "@" << (fun2==nullptr?"":fun2->getName()) << "]\n";
+            if (result == AliasResult::NoAlias) continue;
+            std::string info1 = "anno";
+            std::string info2 = "anno";
+            std::string tmp = node1->getInfo();
+            if (!tmp.empty()) info1 = tmp;
+            tmp = node2->getInfo();
+            if (!tmp.empty()) info2 = tmp;
+            SVFUtil::outs() 
+                << (result == AliasResult::NoAlias ? "NoAlias" : 
+                    result == AliasResult::MayAlias ? "MayAlias" :
+                    result == AliasResult::MustAlias ? "MustAlias" : "PartialAlias") << ","
+                << node1->getId() << ","
+                << node1->getName() << ","
+                << (fun1 == nullptr ? "" : fun1->getName()) << ","
+                << info1 << ","
+                << node2->getId() << ","
+                << node2->getName() << ","
+                << (fun2 == nullptr ? "" : fun2->getName()) << ","
+                << info2 << "\n";
+            SVFUtil::outs().flush();
         }
     }
 }

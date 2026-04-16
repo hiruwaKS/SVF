@@ -482,14 +482,14 @@ GepStmt* SVFIR::addVariantGepStmt(NodeID src, NodeID dst, const AccessPath& ap)
  * Add a temp field value node, this method can only invoked by getGepValVar
  * due to constraint expression, curInst is used to distinguish different instructions (e.g., memorycpy) when creating GepValVar.
  */
-NodeID SVFIR::addGepValNode(NodeID curInst,const ValVar* baseVar, const AccessPath& ap, NodeID i, const SVFType* type, const ICFGNode* icn)
+NodeID SVFIR::addGepValNode(NodeID curInst,const ValVar* baseVar, const AccessPath& ap, NodeID i, const SVFType* type, const ICFGNode* icn, const std::string& info)
 {
     NodeID base = baseVar->getId();
     //assert(findPAGNode(i) == false && "this node should not be created before");
     assert(0==GepValObjMap[curInst].count(std::make_pair(base, ap))
            && "this node should not be created before");
     GepValObjMap[curInst][std::make_pair(base, ap)] = i;
-    GepValVar *node = new GepValVar(baseVar, i, ap, type, icn);
+    GepValVar *node = new GepValVar(baseVar, i, ap, type, icn, info);
     node->setLLVMVarInstID(curInst);
     return addValNode(node);
 }
@@ -562,7 +562,7 @@ NodeID SVFIR::addGepObjNode(const BaseObjVar* baseObj, const APOffset& apOffset,
     assert(0==GepObjVarMap.count(std::make_pair(base, apOffset))
            && "this node should not be created before");
     //ABTest
-    GepObjVar *node = new GepObjVar(baseObj, gepId, apOffset);
+    GepObjVar *node = new GepObjVar(baseObj, gepId, apOffset, "tmpgep");
     return addGepObjNode(node, base, apOffset);
 }
 

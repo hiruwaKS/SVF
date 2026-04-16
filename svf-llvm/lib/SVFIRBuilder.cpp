@@ -367,6 +367,67 @@ void SVFIRBuilder::createFunObjVars()
     initFunObjVar();
 }
 
+std::string getVarLocationInfo(const llvm::Value* llvmValue, bool use_idx = true) {
+    if (!llvmValue) return "unknown:unknown:unknown";
+    
+    std::string moduleName = "unknown";
+    std::string funcName = "unknown";
+    const llvm::Function* func = nullptr;
+    
+    if (auto I = llvm::dyn_cast<llvm::Instruction>(llvmValue)) {
+        func = I->getFunction();
+    } else if (auto A = llvm::dyn_cast<llvm::Argument>(llvmValue)) {
+        func = A->getParent();
+    } else if (auto F = llvm::dyn_cast<llvm::Function>(llvmValue)) {
+        func = F;
+    }
+    
+    if (func) {
+        funcName = func->getName().str();
+        if (auto M = func->getParent())
+            moduleName = M->getModuleIdentifier();
+    } else if (auto G = llvm::dyn_cast<llvm::GlobalValue>(llvmValue)) {
+        if (auto M = G->getParent())
+            moduleName = M->getModuleIdentifier();
+        funcName = "<global>";
+    }
+    
+    std::string valueName;
+    if (use_idx) {
+        if (auto I = llvm::dyn_cast<llvm::Instruction>(llvmValue)) {
+            if (func) {
+                int index = 0;
+                for (const auto& bb : *func) {
+                    for (const auto& inst : bb) {
+                        if (&inst == I) {
+                            valueName = std::to_string(index);
+                            break;
+                        }
+                        index++;
+                    }
+                    if (!valueName.empty()) break;
+                }
+            }
+            if (valueName.empty()) valueName = "unknown";
+        } else if (auto A = llvm::dyn_cast<llvm::Argument>(llvmValue)) {
+            valueName = "arg" + std::to_string(A->getArgNo());
+        } else if (llvmValue->hasName()) {
+            valueName = llvmValue->getName().str();
+        } else {
+            valueName = "unnamed";
+        }
+    } else {
+        // 使用 print
+        llvm::raw_string_ostream rso(valueName);
+        llvmValue->print(rso);
+        while (!valueName.empty() && valueName.back() == '\n') {
+            valueName.pop_back();
+        }
+    }
+    
+    return moduleName + ":" + funcName + ":" + valueName;
+}
+
 void SVFIRBuilder::initialiseBaseObjVars()
 {
     // Iterate over all object symbols in the symbol table
@@ -383,6 +444,7 @@ void SVFIRBuilder::initialiseBaseObjVars()
 
         // Get the LLVM value corresponding to the symbol
         const Value* llvmValue = iter->first;
+        std::string info = getVarLocationInfo(llvmValue);
 
         const ICFGNode* icfgNode = nullptr;
         if (const Instruction* inst = SVFUtil::dyn_cast<Instruction>(llvmValue))
@@ -400,13 +462,13 @@ void SVFIRBuilder::initialiseBaseObjVars()
         else if (LLVMUtil::isHeapObj(llvmValue))
         {
             NodeID id = llvmModuleSet()->getObjectNode(iter->first);
-            pag->addHeapObjNode(iter->second, pag->getObjTypeInfo(id), icfgNode);
+            pag->addHeapObjNode(iter->second, pag->getObjTypeInfo(id), icfgNode, info);
         }
         // Check if the value is an alloca instruction and add a stack object node
         else if (LLVMUtil::isStackObj(llvmValue))
         {
             NodeID id = llvmModuleSet()->getObjectNode(iter->first);
-            pag->addStackObjNode(iter->second, pag->getObjTypeInfo(id), icfgNode);
+            pag->addStackObjNode(iter->second, pag->getObjTypeInfo(id), icfgNode, info);
         }
         else if (auto fpValue = SVFUtil::dyn_cast<ConstantFP>(llvmValue))
         {
@@ -426,7 +488,7 @@ void SVFIRBuilder::initialiseBaseObjVars()
         else if (SVFUtil::isa<GlobalValue>(llvmValue))
         {
             NodeID id = llvmModuleSet()->getObjectNode(iter->first);
-            pag->addGlobalObjNode(iter->second, pag->getObjTypeInfo(id), icfgNode);
+            pag->addGlobalObjNode(iter->second, pag->getObjTypeInfo(id), icfgNode, info);
         }
         else if (SVFUtil::isa<ConstantData, ConstantExpr, MetadataAsValue, BlockAddress>(llvmValue))
         {
@@ -449,6 +511,7 @@ void SVFIRBuilder::initialiseBaseObjVars()
 
 }
 
+
 void SVFIRBuilder::initialiseValVars()
 {
     // Iterate over all value symbols in the symbol table
@@ -465,11 +528,12 @@ void SVFIRBuilder::initialiseValVars()
 
         const ICFGNode* icfgNode = nullptr;
         auto llvmValue = iter->first;
+        std::string info = getVarLocationInfo(llvmValue);
 
         // Check if the value is a function and get its call graph node
         if (const Function* func = SVFUtil::dyn_cast<Function>(llvmValue))
         {
-            pag->addFunValNode(iter->second, icfgNode, llvmModuleSet()->getFunObjVar(func), llvmModuleSet()->getSVFType(llvmValue->getType()));
+            pag->addFunValNode(iter->second, icfgNode, llvmModuleSet()->getFunObjVar(func), llvmModuleSet()->getSVFType(llvmValue->getType()),info);
         }
         else if (auto argval = SVFUtil::dyn_cast<Argument>(llvmValue))
         {
@@ -479,7 +543,7 @@ void SVFIRBuilder::initialiseValVars()
             const ICFGNode* entryNode = funObj->isDeclaration() ? nullptr : pag->getICFG()->getFunEntryICFGNode(funObj);
             pag->addArgValNode(
                 iter->second, argval->getArgNo(), entryNode,
-                funObj, llvmModuleSet()->getSVFType(llvmValue->getType()));
+                funObj, llvmModuleSet()->getSVFType(llvmValue->getType()),info);
             if (!argval->hasName())
                 pag->getGNode(iter->second)->setName("arg_" + std::to_string(argval->getArgNo()));
         }
@@ -499,15 +563,15 @@ void SVFIRBuilder::initialiseValVars()
         {
             // Global variables are defined at the global ICFG node.
             pag->addGlobalValNode(iter->second, pag->getICFG()->getGlobalICFGNode(),
-                                  llvmModuleSet()->getSVFType(llvmValue->getType()));
+                                  llvmModuleSet()->getSVFType(llvmValue->getType()),info);
         }
         else if (SVFUtil::isa<ConstantData, ConstantExpr, MetadataAsValue, BlockAddress>(llvmValue))
         {
-            pag->addConstantDataValNode(iter->second, icfgNode, llvmModuleSet()->getSVFType(llvmValue->getType()));
+            pag->addConstantDataValNode(iter->second, icfgNode, llvmModuleSet()->getSVFType(llvmValue->getType()),info);
         }
         else if (SVFUtil::isa<ConstantAggregate>(llvmValue))
         {
-            pag->addConstantAggValNode(iter->second, icfgNode, llvmModuleSet()->getSVFType(llvmValue->getType()));
+            pag->addConstantAggValNode(iter->second, icfgNode, llvmModuleSet()->getSVFType(llvmValue->getType()),info);
         }
         else if (SVFUtil::isa<BasicBlock>(llvmValue))
         {
@@ -517,7 +581,7 @@ void SVFIRBuilder::initialiseValVars()
                  SVFUtil::isa<DSOLocalEquivalent>(llvmValue) ||
                  SVFUtil::isa<NoCFIValue>(llvmValue))
         {
-            pag->addAsmPCValNode(iter->second, llvmModuleSet()->getSVFType(llvmValue->getType()));
+            pag->addAsmPCValNode(iter->second, llvmModuleSet()->getSVFType(llvmValue->getType()),info);
         }
         else if (const Instruction* inst = SVFUtil::dyn_cast<Instruction>(llvmValue))
         {
@@ -527,7 +591,7 @@ void SVFIRBuilder::initialiseValVars()
             {
                 assert(llvmModuleSet()->hasICFGNode(inst) && "LLVM instruction is not associated with an ICFGNode");
                 icfgNode = llvmModuleSet()->getICFGNode(inst);
-                pag->addValNode(iter->second, llvmModuleSet()->getSVFType(llvmValue->getType()), icfgNode);
+                pag->addValNode(iter->second, llvmModuleSet()->getSVFType(llvmValue->getType()), icfgNode, info);
             }
         }
         llvmModuleSet()->addToSVFVar2LLVMValueMap(llvmValue,
@@ -557,6 +621,7 @@ void SVFIRBuilder::initialiseNodes()
             ++iter)
     {
         const Value* llvmValue = iter->first;
+        std::string info = getVarLocationInfo(llvmValue);
         // retSyms keys are Function*, not Instruction, so dyn_cast<Instruction> always fails.
         // RetValPN represents the callee's return value, defined at FunExitICFGNode.
         // External functions have no exit node, so keep nullptr.
@@ -565,7 +630,7 @@ void SVFIRBuilder::initialiseNodes()
         DBOUT(DPAGBuild, outs() << "add ret node " << iter->second << "\n");
         pag->addRetNode(iter->second,
                         funObjVar,
-                        llvmModuleSet()->getSVFType(iter->first->getType()), icfgNode);
+                        llvmModuleSet()->getSVFType(iter->first->getType()), icfgNode, info);
         llvmModuleSet()->addToSVFVar2LLVMValueMap(llvmValue, pag->getGNode(iter->second));
         pag->returnFunObjSymMap[funObjVar] = iter->second;
     }
@@ -575,6 +640,7 @@ void SVFIRBuilder::initialiseNodes()
             iter != llvmModuleSet()->varargSyms().end(); ++iter)
     {
         const Value* llvmValue = iter->first;
+        std::string info = getVarLocationInfo(llvmValue);
         // varargSyms keys are Function*, not Instruction.
         // Variadic arguments are received at the function entry point.
         // External functions have no entry node, so keep nullptr.
@@ -583,7 +649,7 @@ void SVFIRBuilder::initialiseNodes()
         DBOUT(DPAGBuild, outs() << "add vararg node " << iter->second << "\n");
         pag->addVarargNode(iter->second,
                            funObjVar,
-                           llvmModuleSet()->getSVFType(iter->first->getType()), icfgNode);
+                           llvmModuleSet()->getSVFType(iter->first->getType()), icfgNode, info);
         llvmModuleSet()->addToSVFVar2LLVMValueMap(llvmValue, pag->getGNode(iter->second));
         pag->varargFunObjSymMap[funObjVar] = iter->second;
     }
@@ -1710,9 +1776,10 @@ NodeID SVFIRBuilder::getGepValVar(const Value* val, const AccessPath& ap, const 
             // GEP on a global variable: the resulting GepValVar belongs to the global ICFG node.
             node = pag->getICFG()->getGlobalICFGNode();
         }
+        std::string info = getVarLocationInfo(curVal);
         NodeID gepNode = pag->addGepValNode(llvmModuleSet()->getValueNode(curVal), cast<ValVar>(pag->getGNode(getValueNode(val))), ap,
                                             NodeIDAllocator::get()->allocateValueId(),
-                                            llvmmodule->getSVFType(PointerType::getUnqual(llvmmodule->getContext())), node);
+                                            llvmmodule->getSVFType(PointerType::getUnqual(llvmmodule->getContext())), node, info);
         addGepEdge(base, gepNode, ap, true);
         setCurrentLocation(cval, cbb);
         return gepNode;
